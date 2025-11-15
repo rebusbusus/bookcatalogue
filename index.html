@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Indexer: Catalogue Research</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Garamond Font from Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        /* Custom Dark Academia / Vintage Palette */
+        :root {
+            --color-bg-dark: #1e1e24; /* Deep Ink/Dark Grey */
+            --color-surface-card: #2c2c34; /* Slightly lighter card surface */
+            --color-accent-green: #3c6b4e; /* Deep Forest Green */
+            --color-accent-red: #A0522D; /* Vintage Burnt Sienna Red */
+            --color-text-light: #fdf6e3; /* Aged Cream/Ivory */
+        }
+        body {
+            background-color: var(--color-bg-dark);
+            color: var(--color-text-light);
+            font-family: 'Cormorant Garamond', serif;
+        }
+        .text-garamond {
+            font-family: 'Cormorant Garamond', serif;
+        }
+        .bg-surface {
+            background-color: var(--color-surface-card);
+        }
+        .btn-green {
+            background-color: var(--color-accent-green);
+            color: var(--color-text-light);
+            transition: background-color 0.2s;
+        }
+        .btn-green:hover {
+            background-color: #558063; /* Lighter shade on hover */
+        }
+        .input-style {
+            background-color: var(--color-bg-dark);
+            border-color: var(--color-accent-green);
+            color: var(--color-text-light);
+        }
+        /* Custom scrollbar for the scrollable card content */
+        .card-scrollable::-webkit-scrollbar {
+            width: 4px;
+        }
+        .card-scrollable::-webkit-scrollbar-thumb {
+            background: var(--color-accent-green);
+            border-radius: 2px;
+        }
+        .card-scrollable::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="p-6 md:p-10 min-h-screen">
+
+    <!-- Header -->
+    <header class="text-center mb-12">
+        <h1 class="text-4xl md:text-5xl font-semibold mb-2" style="color: var(--color-accent-red);">The Scholar's Index</h1>
+        <p class="text-lg italic opacity-80">Quickly catalogue your research materials from the boundless library.</p>
+    </header>
+
+    <!-- Search Input Area -->
+    <div class="max-w-4xl mx-auto mb-4">
+        <div class="flex flex-col sm:flex-row gap-3">
+            <input type="text" id="searchInput" value="A Rather Wanton Exhibition by E.S. Exeter" placeholder="Search by Title, Author, or ISBN..."
+                   class="input-style flex-grow p-3 rounded-lg border-2 focus:ring-0 focus:outline-none placeholder-gray-500 shadow-xl">
+            <button id="searchButton" onclick="searchBooks()"
+                    class="btn-green p-3 rounded-lg font-bold text-lg uppercase shadow-xl hover:shadow-2xl transition duration-300">
+                Index Book
+            </button>
+        </div>
+    </div>
+    
+    <!-- Message Area (Loading / Errors) - Moved here for better visibility -->
+    <div id="messageArea" class="max-w-4xl mx-auto text-center p-4 rounded-lg text-red-400 font-semibold hidden mb-8"></div>
+
+
+    <!-- Results Display Area -->
+    <div id="resultsContainer" class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <!-- Book cards will be injected here -->
+    </div>
+
+    <script>
+        const API_URL = 'https://www.googleapis.com/books/v1/volumes?q=';
+        const resultsContainer = document.getElementById('resultsContainer');
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const messageArea = document.getElementById('messageArea');
+        const MAX_RESULTS = 9; // Increased limit
+
+        // --- GLOBAL CACHE FOR BOOK DATA ---
+        const bookDataCache = {}; 
+
+        // --- Utility Functions ---
+
+        /**
+         * Displays a temporary message (error or success)
+         * @param {string} msg The message text.
+         * @param {string} type 'success' or 'error'.
+         */
+        function displayMessage(msg, type = 'error') {
+            messageArea.textContent = msg;
+            messageArea.className = `max-w-4xl mx-auto text-center p-4 rounded-lg font-semibold mb-8 transition-opacity duration-300 ${type === 'error' ? 'text-red-400' : 'text-green-400'} opacity-100`;
+            messageArea.style.display = 'block';
+
+            // Hide the message after 5 seconds
+            setTimeout(() => {
+                messageArea.className = messageArea.className.replace('opacity-100', 'opacity-0');
+                setTimeout(() => { messageArea.style.display = 'none'; }, 500);
+            }, 5000);
+        }
+
+        /**
+         * Cleans up text for Notion pasting AND display. (Reverted to MINIMAL cleaning)
+         * @param {string} text The raw text.
+         * @returns {string} The cleaned text.
+         */
+        function cleanText(text) {
+            if (!text) return '';
+            
+            // 1. Remove HTML tags (the most essential step for safety and Notion compatibility)
+            let cleaned = text.replace(/<[^>]*>/g, '');
+            
+            // 2. Replace newlines and carriage returns with a single space for block paste.
+            cleaned = cleaned.replace(/(\r\n|\n|\r)/gm, ' '); 
+            
+            // 3. Collapse multiple spaces and trim.
+            cleaned = cleaned.replace(/\s+/g, ' ').trim();
+                             
+            return cleaned;
+        }
+
+        /**
+         * Generates the structured text block for Notion and copies it.
+         * @param {string} itemId The unique ID of the book item.
+         */
+        function formatAndCopy(itemId) {
+            const book = bookDataCache[itemId]; // Retrieve object from cache
+            
+            if (!book || !book.volumeInfo) {
+                displayMessage("Error: Book data not found in cache. Cannot copy.", 'error');
+                return;
+            }
+
+            const { title, authors, publishedDate, description, pageCount, language } = book.volumeInfo;
+            const link = book.selfLink;
+            const date = publishedDate ? publishedDate.substring(0, 4) : 'Unknown';
+            const pages = pageCount || 'TBC';
+            const authorsStr = authors ? authors.join(', ') : 'Unknown Author(s)';
+            const summary = cleanText(description || 'No detailed summary available.');
+
+            const formattedText = `
+**TITLE:** ${title || 'N/A'}
+**AUTHOR(S):** ${authorsStr}
+**PUBLISHED:** ${date}
+**PAGES:** ${pages}
+**LANGUAGE:** ${language ? language.toUpperCase() : 'N/A'}
+**SOURCE URL:** ${link || 'N/A'}
+---
+**SUMMARY:**
+${summary}
+`;
+
+            // Copy to clipboard logic
+            const success = copyToClipboard(formattedText.trim());
+            if (success) {
+                displayMessage("Data block successfully copied to clipboard! Paste it into your Notion page.", 'success');
+            } else {
+                displayMessage("Failed to copy data block. Please manually copy the generated text.", 'error');
+            }
+        }
+
+        /**
+         * Core clipboard function using navigator.clipboard, with execCommand fallback.
+         */
+        function copyToClipboard(text) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => {
+                    // Success is handled by the caller (formatAndCopy)
+                }).catch(err => {
+                    console.error('Async clipboard failed, falling back:', err);
+                    return fallbackCopy(text);
+                });
+                return true; // Assume success for async call
+            } else {
+                return fallbackCopy(text);
+            }
+        }
+
+        /**
+         * Fallback for clipboard functionality (required in some iframe environments)
+         */
+        function fallbackCopy(text) {
+            const tempInput = document.createElement('textarea');
+            tempInput.value = text;
+            tempInput.style.position = 'fixed'; // Prevents scrolling to bottom
+            tempInput.style.opacity = '0';
+            document.body.appendChild(tempInput);
+            tempInput.focus();
+            tempInput.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                return successful;
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+                document.body.removeChild(tempInput);
+                return false;
+            }
+        }
+
+        // --- Rendering Logic ---
+
+        /**
+         * Renders the search results as styled cards.
+         * @param {Array} items Array of book volume items from the API.
+         */
+        function displayResults(items) {
+            resultsContainer.innerHTML = '';
+            // Clear cache and refill for the new set of results
+            Object.keys(bookDataCache).forEach(key => delete bookDataCache[key]);
+            
+            // Filter out any null or malformed items right away
+            const validItems = items.filter(item => item && item.id && item.volumeInfo);
+
+            if (validItems.length === 0) {
+                displayMessage('No scholarly tomes found matching your query, or all results were too malformed to display.', 'error');
+                return;
+            }
+            
+            // Use for...of loop for better error handling on individual items
+            for (const item of validItems.slice(0, MAX_RESULTS)) {
+                try {
+                    // 1. Store item in cache
+                    bookDataCache[item.id] = item; 
+
+                    const { volumeInfo } = item;
+                    const title = volumeInfo.title || 'Untitled Work';
+                    const authors = volumeInfo.authors ? volumeInfo.authors.join(', ') : 'Unknown Author(s)';
+                    const published = volumeInfo.publishedDate ? volumeInfo.publishedDate.substring(0, 4) : 'N/A';
+                    const coverUrl = volumeInfo.imageLinks ? volumeInfo.imageLinks.thumbnail : 'https://placehold.co/128x192/1e1e24/A0522D?text=NO+COVER';
+                    
+                    // 2. Clean the description for display
+                    const descriptionText = cleanText(volumeInfo.description || 'No detailed summary available.'); 
+
+                    const cardHtml = `
+                        <!-- The card needs to be relative for the fixed button to work correctly within it -->
+                        <div class="bg-surface p-6 rounded-xl shadow-2xl flex flex-col relative border border-gray-700 h-96">
+                            
+                            <!-- Scrollable Content Wrapper -->
+                            <div class="flex-grow overflow-y-auto card-scrollable pr-2 pb-16">
+                                
+                                <!-- Header Info -->
+                                <div class="flex gap-4 mb-4 items-start">
+                                    <!-- Book Cover -->
+                                    <img src="${coverUrl}" alt="Cover of ${title}"
+                                         class="w-20 h-auto object-cover rounded-md shadow-lg flex-shrink-0 border border-gray-600">
+                                    
+                                    <!-- Text Details -->
+                                    <div class="flex-grow min-w-0">
+                                        <h3 class="text-xl font-bold mb-1 line-clamp-2" style="color: var(--color-accent-green);">${title}</h3>
+                                        <p class="text-sm italic opacity-70 mb-2">By ${authors}</p>
+                                        <p class="text-xs opacity-50">Published: ${published}</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Description (Summary) -->
+                                <p id="desc-${item.id}" class="text-sm opacity-80 mt-2 whitespace-pre-wrap"></p>
+
+                            </div>
+
+                            <!-- Action Button - Fixed to the bottom of the card -->
+                            <div class="absolute bottom-0 left-0 right-0 p-4 pt-2 bg-surface rounded-b-xl shadow-inner border-t border-gray-700">
+                                <!-- 3. Pass only the unique item ID to the handler -->
+                                <button onclick='formatAndCopy("${item.id}")' 
+                                        class="btn-green w-full p-2 rounded-lg font-semibold text-sm hover:ring-2 hover:ring-green-500 transition duration-200">
+                                    Copy Data
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    resultsContainer.insertAdjacentHTML('beforeend', cardHtml);
+                    
+                    // Use textContent to safely insert the cleaned description text
+                    document.getElementById(`desc-${item.id}`).textContent = descriptionText;
+                    
+                } catch (e) {
+                    console.error(`Skipping malformed item with ID ${item.id || 'N/A'}:`, e);
+                    // Display a placeholder card for the error:
+                    const errorCard = `
+                        <div class="bg-surface p-6 rounded-xl shadow-2xl flex flex-col relative border border-red-700 h-96 opacity-50">
+                            <h3 class="text-xl font-bold mb-1 text-red-400">Error Loading Item</h3>
+                            <p class="text-sm italic opacity-70">This result was too structurally damaged to display safely.</p>
+                            <p class="text-xs mt-4">Title: ${item.volumeInfo?.title || 'Unknown'}</p>
+                        </div>
+                    `;
+                    resultsContainer.insertAdjacentHTML('beforeend', errorCard);
+                }
+            } // End of for...of loop
+        }
+
+        // --- API Call Logic ---
+
+        /**
+         * Fetches book data from Google Books API.
+         */
+        async function searchBooks() {
+            const query = searchInput.value.trim();
+            if (!query) {
+                displayMessage('Please enter a title, author, or ISBN to begin indexing.', 'error');
+                return;
+            }
+
+            resultsContainer.innerHTML = '';
+            messageArea.style.display = 'block';
+            messageArea.className = 'max-w-4xl mx-auto text-center p-4 rounded-lg text-green-400 font-semibold mb-8';
+            messageArea.textContent = 'Consulting the Grand Library archives...';
+            searchButton.disabled = true;
+
+            try {
+                // Request MAX_RESULTS books
+                const response = await fetchWithRetry(`${API_URL}${encodeURIComponent(query)}&maxResults=${MAX_RESULTS}`);
+                const data = await response.json();
+                
+                // CRITICAL CHECK: Ensure we have items before trying to process them
+                if (data.items) {
+                    displayResults(data.items);
+                    messageArea.style.display = 'none';
+                } else {
+                    displayMessage('No results found for that query. Try refining your search.', 'error');
+                }
+            } catch (error) {
+                console.error('API Error:', error);
+                displayMessage(`A critical error occurred while fetching data: ${error.message}`, 'error');
+            } finally {
+                searchButton.disabled = false;
+            }
+        }
+
+        /**
+         * Handles API call with exponential backoff for resilience.
+         */
+        async function fetchWithRetry(url, retries = 3, delay = 1000) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        return response;
+                    } else if (response.status === 429 && i < retries - 1) {
+                        // Too Many Requests - wait and retry
+                        await new Promise(resolve => setTimeout(resolve, delay * (2 ** i)));
+                    } else {
+                        throw new Error(`API returned status ${response.status}`);
+                    }
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    // Wait before retrying on network error
+                    await new Promise(resolve => setTimeout(resolve, delay * (2 ** i)));
+                }
+            }
+            throw new Error('Failed to fetch data after multiple retries.');
+        }
+
+
+        // --- Event Listeners ---
+
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchBooks();
+            }
+        });
+
+        // --- Initial Load ---
+        // Run search on page load with the pre-filled query
+        window.onload = searchBooks;
+
+    </script>
+</body>
+</html>
