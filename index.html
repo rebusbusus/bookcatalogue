@@ -16,11 +16,15 @@
             --color-accent-green: #3c6b4e; /* Deep Forest Green */
             --color-accent-red: #A0522D; /* Vintage Burnt Sienna Red */
             --color-text-light: #fdf6e3; /* Aged Cream/Ivory */
+            --color-message-success: #7a9c85; /* Muted, softer green for success/loading messages */
         }
         body {
             background-color: var(--color-bg-dark);
             color: var(--color-text-light);
             font-family: 'Cormorant Garamond', serif;
+            /* Firefox Scrollbar Styling */
+            scrollbar-color: var(--color-accent-green) var(--color-surface-card);
+            scrollbar-width: thin;
         }
         .text-garamond {
             font-family: 'Cormorant Garamond', serif;
@@ -41,17 +45,42 @@
             border-color: var(--color-accent-green);
             color: var(--color-text-light);
         }
+        /* Custom scrollbar styles (Webkit/Chrome/Safari) */
+        
+        /* Main Body Scrollbar */
+        body::-webkit-scrollbar {
+            width: 8px; 
+            /* Ensure the track is always the dark surface color */
+            background-color: var(--color-surface-card); 
+        }
+        /* This targets the thumb (handle) */
+        body::-webkit-scrollbar-thumb {
+            background: var(--color-accent-green); 
+            border-radius: 4px;
+        }
+        /* This targets the thumb when clicked or actively dragged (critical for your request) */
+        body::-webkit-scrollbar-thumb:hover,
+        body::-webkit-scrollbar-thumb:active {
+            background: #558063; /* Use the slightly lighter hover shade */
+        }
+
+
         /* Custom scrollbar for the scrollable card content */
         .card-scrollable::-webkit-scrollbar {
             width: 4px;
         }
         .card-scrollable::-webkit-scrollbar-thumb {
-            background: var(--color-accent-green);
+            background: var(--color-accent-green); 
             border-radius: 2px;
         }
         .card-scrollable::-webkit-scrollbar-track {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 2px;
+        }
+         /* Ensures the card scrollbar thumb stays consistent on hover/active too */
+        .card-scrollable::-webkit-scrollbar-thumb:hover,
+        .card-scrollable::-webkit-scrollbar-thumb:active {
+            background: #558063;
         }
     </style>
 </head>
@@ -66,7 +95,8 @@
     <!-- Search Input Area -->
     <div class="max-w-4xl mx-auto mb-4">
         <div class="flex flex-col sm:flex-row gap-3">
-            <input type="text" id="searchInput" value="A Rather Wanton Exhibition by E.S. Exeter" placeholder="Search by Title, Author, or ISBN..."
+            <!-- Updated value to be empty by default -->
+            <input type="text" id="searchInput" value="" placeholder="Search by Title, Author, or ISBN..."
                    class="input-style flex-grow p-3 rounded-lg border-2 focus:ring-0 focus:outline-none placeholder-gray-500 shadow-xl">
             <button id="searchButton" onclick="searchBooks()"
                     class="btn-green p-3 rounded-lg font-bold text-lg uppercase shadow-xl hover:shadow-2xl transition duration-300">
@@ -85,7 +115,8 @@
     </div>
 
     <script>
-        const API_URL = 'https://www.googleapis.com/books/v1/volumes?q=';
+        // Base API URL for Google Books
+        const API_BASE_URL = 'https://www.googleapis.com/books/v1/volumes?q=';
         const resultsContainer = document.getElementById('resultsContainer');
         const searchInput = document.getElementById('searchInput');
         const searchButton = document.getElementById('searchButton');
@@ -103,9 +134,20 @@
          * @param {string} type 'success' or 'error'.
          */
         function displayMessage(msg, type = 'error') {
+            const successColor = 'var(--color-message-success)';
+            const errorColor = 'var(--color-accent-red)';
+            
             messageArea.textContent = msg;
-            messageArea.className = `max-w-4xl mx-auto text-center p-4 rounded-lg font-semibold mb-8 transition-opacity duration-300 ${type === 'error' ? 'text-red-400' : 'text-green-400'} opacity-100`;
+            messageArea.className = `max-w-4xl mx-auto text-center p-4 rounded-lg font-semibold mb-8 transition-opacity duration-300 opacity-100`;
             messageArea.style.display = 'block';
+            
+            // Apply custom colors based on type
+            if (type === 'error') {
+                messageArea.style.color = errorColor;
+            } else {
+                // This covers 'success' and 'loading' messages
+                messageArea.style.color = successColor;
+            }
 
             // Hide the message after 5 seconds
             setTimeout(() => {
@@ -115,14 +157,14 @@
         }
 
         /**
-         * Cleans up text for Notion pasting AND display. (Reverted to MINIMAL cleaning)
+         * Cleans up text for Notion pasting AND display.
          * @param {string} text The raw text.
          * @returns {string} The cleaned text.
          */
         function cleanText(text) {
             if (!text) return '';
             
-            // 1. Remove HTML tags (the most essential step for safety and Notion compatibility)
+            // 1. Remove HTML tags
             let cleaned = text.replace(/<[^>]*>/g, '');
             
             // 2. Replace newlines and carriage returns with a single space for block paste.
@@ -147,7 +189,7 @@
             }
 
             const { title, authors, publishedDate, description, pageCount, language } = book.volumeInfo;
-            const link = book.selfLink;
+            // Removed 'link' variable as it's no longer used in the output
             const date = publishedDate ? publishedDate.substring(0, 4) : 'Unknown';
             const pages = pageCount || 'TBC';
             const authorsStr = authors ? authors.join(', ') : 'Unknown Author(s)';
@@ -159,11 +201,10 @@
 **PUBLISHED:** ${date}
 **PAGES:** ${pages}
 **LANGUAGE:** ${language ? language.toUpperCase() : 'N/A'}
-**SOURCE URL:** ${link || 'N/A'}
 ---
 **SUMMARY:**
 ${summary}
-`;
+`; // Removed **SOURCE URL:** line
 
             // Copy to clipboard logic
             const success = copyToClipboard(formattedText.trim());
@@ -318,17 +359,27 @@ ${summary}
 
             resultsContainer.innerHTML = '';
             messageArea.style.display = 'block';
-            messageArea.className = 'max-w-4xl mx-auto text-center p-4 rounded-lg text-green-400 font-semibold mb-8';
-            messageArea.textContent = 'Consulting the Grand Library archives...';
+            
+            // Set message color using the new muted success color
+            displayMessage('Consulting the Grand Library archives...', 'success');
+            
             searchButton.disabled = true;
 
             try {
-                // Request MAX_RESULTS books
-                const response = await fetchWithRetry(`${API_URL}${encodeURIComponent(query)}&maxResults=${MAX_RESULTS}`);
-                const data = await response.json();
+                // 1. Attempt a precise search, restricting the query to the title field.
+                const preciseUrl = `${API_BASE_URL}intitle:"${encodeURIComponent(query)}"&maxResults=${MAX_RESULTS}`;
+                let data = await fetchData(preciseUrl);
                 
+                // 2. Fallback to a general search if the precise search returns no results
+                if (!data.items || data.items.length === 0) {
+                    // Use displayMessage to set the color of the fallback message correctly
+                    displayMessage('Precise title match failed. Attempting general search...', 'success');
+                    const generalUrl = `${API_BASE_URL}${encodeURIComponent(query)}&maxResults=${MAX_RESULTS}`;
+                    data = await fetchData(generalUrl);
+                }
+
                 // CRITICAL CHECK: Ensure we have items before trying to process them
-                if (data.items) {
+                if (data.items && data.items.length > 0) {
                     displayResults(data.items);
                     messageArea.style.display = 'none';
                 } else {
@@ -340,6 +391,14 @@ ${summary}
             } finally {
                 searchButton.disabled = false;
             }
+        }
+
+        /**
+         * Helper function to fetch data and handle retries/errors.
+         */
+        async function fetchData(url) {
+            const response = await fetchWithRetry(url);
+            return response.json();
         }
 
         /**
@@ -376,8 +435,7 @@ ${summary}
         });
 
         // --- Initial Load ---
-        // Run search on page load with the pre-filled query
-        window.onload = searchBooks;
+        // Removed window.onload = searchBooks; to prevent search on load when input is empty.
 
     </script>
 </body>
